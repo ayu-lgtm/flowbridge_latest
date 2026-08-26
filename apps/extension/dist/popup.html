@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FlowBridge</title>
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --text: #101425;
+        --muted: #5b6478;
+        --border: #e2e6f0;
+        --accent: #4f46e5;
+        --pill: #e7eaf3;
+        --pill-connected: #d1fae5;
+        --pill-connected-text: #065f46;
+        --pill-error: #fee2e2;
+        --pill-error-text: #991b1b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f172a;
+          --card: #1e293b;
+          --text: #e2e8f0;
+          --muted: #94a3b8;
+          --border: #334155;
+          --accent: #3b82f6;
+          --pill: #334155;
+          --pill-connected: #166534;
+          --pill-connected-text: #d1fae5;
+          --pill-error: #7f1d1d;
+          --pill-error-text: #fee2e2;
+        }
+      }
+      body {
+        width: 320px;
+        margin: 0;
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 14px;
+      }
+      h1 { font-size: 15px; margin: 0 0 10px; display:flex; align-items:center; justify-content:space-between; }
+      .pill { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--pill); color: var(--muted); text-transform: capitalize; }
+      .pill.connected { background: var(--pill-connected); color: var(--pill-connected-text); }
+      .pill.error { background: var(--pill-error); color: var(--pill-error-text); }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+      .muted { color: var(--muted); font-size: 12px; margin: 3px 0; }
+      .code { font-size: 24px; font-weight: 700; letter-spacing: 2px; text-align: center; padding: 10px; background: var(--bg); border-radius: 8px; margin: 8px 0; }
+      .qr-image { width: 200px; height: 200px; display: block; margin: 8px auto; border-radius: 8px; background: white; padding: 8px; }
+      button { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 6px; }
+      button.secondary { background: var(--pill); color: var(--text); }
+      input, textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; width: 100%; margin-top: 6px; font-family: inherit; }
+      .progress-bar { height: 5px; background: var(--pill); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+      .progress-fill { height: 100%; background: var(--accent); }
+      .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 5px 0; border-top: 1px solid var(--border); }
+      .transfer-item { font-size: 12px; margin-bottom: 6px; }
+      a.link { color: var(--accent); font-size: 11px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>Phone ↔ Laptop <span id="statusPill" class="pill">idle</span></h1>
+    <div id="app"></div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

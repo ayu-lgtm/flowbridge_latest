@@ -1,0 +1,30 @@
+# Fly.io app config for the FlowBridge signaling/relay server.
+# Deploy from the apps/server directory: `fly launch` then `fly deploy`.
+# See /docs/SETUP.md for the full step-by-step.
+
+app = "flowbridge-relay" # fly launch will ask to rename this if taken — pick anything unique
+primary_region = "sin"   # pick the region closest to you/your devices, e.g. "bom" (Mumbai) or "sin" (Singapore)
+
+[build]
+  dockerfile = "apps/server/Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # <- the whole point: never sleeps, unlike Render's free tier
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "FlowBridge — Phone ↔ Laptop Bridge",
+  "version": "1.0.0",
+  "description": "Two-way clipboard sync and file transfer between your Android phone and this laptop, over an encrypted peer-to-peer connection.",
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon-48.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "clipboardRead",
+    "clipboardWrite",
+    "offscreen",
+    "storage",
+    "downloads",
+    "alarms"
+  ],
+  "host_permissions": [
+    "wss://*/*",
+    "ws://localhost/*"
+  ],
+  "minimum_chrome_version": "116"
+}

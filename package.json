@@ -1,0 +1,17 @@
+{
+  "name": "flowbridge",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:server": "npm run dev --workspace=apps/server",
+    "build:web": "npm run build --workspace=apps/web",
+    "build:extension": "npm run build --workspace=apps/extension",
+    "build:protocol": "npm run build --workspace=packages/protocol",
+    "build:all": "npm run build:protocol && npm run build:web && npm run build:extension"
+  }
+}

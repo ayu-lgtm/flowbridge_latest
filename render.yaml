@@ -1,0 +1,16 @@
+# Render "Blueprint" for the FlowBridge signaling/relay server.
+# Deploy: render.com -> New -> Blueprint -> point it at this repo -> Apply.
+# No credit card required for the free plan. See docs/SETUP.md §3 for the
+# full step-by-step (including the manual "New Web Service" path, if you'd
+# rather not use a Blueprint).
+services:
+  - type: web
+    name: flowbridge-relay
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
