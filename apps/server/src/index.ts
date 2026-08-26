@@ -1,10 +1,54 @@
 import { createServer } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { FlowMessage, DeviceInfo } from "@flowbridge/protocol";
-import { SessionStore, PAIRING_TTL_MS } from "./sessions.js";
+import { SessionStore, PAIRING_TTL_MS, type Room } from "./sessions.js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const store = new SessionStore();
+
+/**
+ * Fixes a real data-loss bug: when one side's socket briefly drops (a page
+ * refresh, a wifi blip, a laptop waking from sleep) its entry is removed
+ * from `room.sockets` for the short window until it reconnects via
+ * "pair:resume". Anything the OTHER device sends during that exact window
+ * used to just vanish — `otherSocket()` returned undefined, the message was
+ * never sent anywhere, and the sender's own UI still showed "done" because
+ * its own socket/outbox was perfectly fine. This queues that message
+ * instead of dropping it, keyed by (room code, the still-offline device's
+ * id), and replays it the moment that device's socket reattaches.
+ *
+ * In-memory only, same as everything else in this server (see sessions.ts)
+ * — a restart clears it, which is fine, since a restart also clears the
+ * rooms these messages belong to.
+ */
+const pendingRelay = new Map<string, Map<string, FlowMessage[]>>(); // roomCode -> offlineDeviceId -> queued messages
+const MAX_QUEUED_PER_DEVICE = 400; // mirrors the client-side outbox cap in connection.ts
+
+function queueForOfflinePeer(room: Room, offlineDeviceId: string, msg: FlowMessage): void {
+  let roomQueue = pendingRelay.get(room.code);
+  if (!roomQueue) {
+    roomQueue = new Map();
+    pendingRelay.set(room.code, roomQueue);
+  }
+  let queue = roomQueue.get(offlineDeviceId);
+  if (!queue) {
+    queue = [];
+    roomQueue.set(offlineDeviceId, queue);
+  }
+  queue.push(msg);
+  if (queue.length > MAX_QUEUED_PER_DEVICE) {
+    queue.shift(); // extremely unlikely — would mean minutes offline while actively receiving
+  }
+}
+
+function flushQueuedFor(roomCode: string, deviceId: string, ws: WebSocket): void {
+  const roomQueue = pendingRelay.get(roomCode);
+  if (!roomQueue) return;
+  const queue = roomQueue.get(deviceId);
+  if (!queue || queue.length === 0) return;
+  roomQueue.delete(deviceId);
+  for (const m of queue) send(ws, m);
+}
 const httpServer = createServer((req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -150,6 +194,10 @@ wss.on("connection", (ws, req) => {
             sessionId: result.room.code,
             peer: result.peer,
           });
+          // This device's socket is registered again as of resumeOrCreate()
+          // above — deliver anything the peer sent while it was offline,
+          // in the order it was sent, before anything new.
+          flushQueuedFor(result.room.code, msg.device.deviceId, ws);
           const peerSocket = store.otherSocket(result.room, msg.device.deviceId);
           if (peerSocket) {
             send(peerSocket, {
@@ -179,7 +227,15 @@ wss.on("connection", (ws, req) => {
         if (!room) return;
         store.touch(room);
         const other = store.otherSocket(room, state.device.deviceId);
-        if (other) send(other, msg);
+        if (other) {
+          send(other, msg);
+        } else {
+          // Peer is a known member of this room but has no live socket right
+          // now (mid-refresh/reconnect) — queue instead of silently dropping
+          // it. Delivered as soon as that device sends "pair:resume" again.
+          const peerId = [...room.devices.keys()].find((id) => id !== state.device!.deviceId);
+          if (peerId) queueForOfflinePeer(room, peerId, msg);
+        }
         return;
       }
     }
@@ -211,4 +267,3 @@ setInterval(() => store.sweep(), 60_000).unref();
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`FlowBridge signaling/relay server listening on :${PORT}`);
 });
-
