@@ -32,17 +32,50 @@ async function ensureOffscreenDocument(): Promise<void> {
   });
 }
 
+/**
+ * Force-recreate the offscreen document, even if Chrome reports one already
+ * exists.
+ *
+ * Why this is needed: `onInstalled` fires every time the extension is
+ * reloaded/updated (the normal dev workflow of hitting "Reload" in
+ * chrome://extensions, and also happens on every real update). Chrome does
+ * NOT automatically close a previously-created offscreen document just
+ * because the background service worker restarted — the OLD offscreen
+ * document can keep "existing" from `getContexts()`'s point of view while
+ * its underlying extension context is actually invalidated. In that state
+ * every chrome.* call in it (chrome.storage.local in particular) never
+ * becomes available, which is exactly the
+ * "chrome.storage.local did not become available in time" error. Since
+ * onInstalled specifically means "this is a fresh instance of the
+ * extension", any offscreen document found here is guaranteed to be a
+ * leftover from the previous instance and must be closed and recreated,
+ * not reused.
+ */
+async function recreateOffscreenDocument(): Promise<void> {
+  try {
+    const existing = await chrome.runtime.getContexts?.({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    });
+    if (existing && existing.length > 0) {
+      await chrome.offscreen.closeDocument();
+    }
+  } catch {
+    // closeDocument() throws if there wasn't actually one open — fine, ignore.
+  }
+  await ensureOffscreenDocument();
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  ensureOffscreenDocument();
+  recreateOffscreenDocument().catch((err) => console.warn("FlowBridge: offscreen recreate failed", err));
   ensureKeepaliveAlarm();
 });
 chrome.runtime.onStartup.addListener(() => {
-  ensureOffscreenDocument();
+  ensureOffscreenDocument().catch((err) => console.warn("FlowBridge: offscreen create failed", err));
   ensureKeepaliveAlarm();
 });
 // Service worker may be woken by a message before onInstalled/onStartup
 // fires in this session; make sure the offscreen doc exists on first use.
-ensureOffscreenDocument();
+ensureOffscreenDocument().catch((err) => console.warn("FlowBridge: offscreen create failed", err));
 ensureKeepaliveAlarm();
 
 /**
@@ -69,15 +102,19 @@ function ensureKeepaliveAlarm(): void {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === KEEPALIVE_ALARM) ensureOffscreenDocument();
+  if (alarm.name === KEEPALIVE_ALARM) {
+    ensureOffscreenDocument().catch((err) => console.warn("FlowBridge: keepalive recreate failed", err));
+  }
 });
 
 // Relay: popup -> offscreen
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target === "offscreen") {
-    ensureOffscreenDocument().then(() => {
-      chrome.runtime.sendMessage(message).catch(() => {});
-    });
+    ensureOffscreenDocument()
+      .then(() => {
+        chrome.runtime.sendMessage(message).catch(() => {});
+      })
+      .catch((err) => console.warn("FlowBridge: offscreen ensure failed", err));
     return false;
   }
   if (message?.target === "background" && message?.type === "get-last-status") {
@@ -95,4 +132,3 @@ chrome.runtime.onMessage.addListener((message) => {
     storageSet({ lastStatus: message.payload }, "session").catch(() => {});
   }
 });
-
