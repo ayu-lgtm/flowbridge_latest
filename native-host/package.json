@@ -1,0 +1,9 @@
+{
+  "name": "native-host",
+  "version": "1.0.0",
+  "main": "host.js",
+  "type": "module",
+  "dependencies": {
+    "clipboardy": "^5.3.2"
+  }
+}

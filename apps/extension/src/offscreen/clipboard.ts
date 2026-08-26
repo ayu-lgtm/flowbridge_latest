@@ -1,21 +1,32 @@
-/**
- * Offscreen documents in Manifest V3 can read/write the system clipboard
- * without a user gesture, provided the extension declares the
- * "clipboardRead"/"clipboardWrite" permissions — this is a capability
- * regular web pages do not have. We still prefer the standard
- * navigator.clipboard async API and fall back to the classic
- * execCommand('paste'/'copy') technique against a hidden textarea, since
- * that fallback is what actually works reliably inside a hidden,
- * never-focused offscreen document in current Chrome versions.
- *
- * Polling note: there is no OS-level "clipboard changed" event exposed to
- * extensions. We poll on an interval, but a *slow, deliberate* one (see
- * POLL_INTERVAL_MS) — not a tight microsecond loop — which keeps CPU/battery
- * impact negligible while still feeling instant to a human copy/paste
- * rhythm.
- */
-
 export const POLL_INTERVAL_MS = 1500;
+
+const NATIVE_HOST_ID = "com.flowbridge.clipboard";
+
+function nativeRead(): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_ID, { type: "read" }, (resp) => {
+        if (chrome.runtime.lastError || !resp?.ok) return resolve(null);
+        resolve(typeof resp.text === "string" ? resp.text : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function nativeWrite(text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST_ID, { type: "write", text }, (resp) => {
+        if (chrome.runtime.lastError || !resp?.ok) return resolve(false);
+        resolve(true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
 
 let hiddenTextarea: HTMLTextAreaElement | null = null;
 
@@ -31,6 +42,8 @@ function getHiddenTextarea(): HTMLTextAreaElement {
 }
 
 export async function readClipboard(): Promise<string | null> {
+  const native = await nativeRead();
+  if (native !== null) return native;
   try {
     const text = await navigator.clipboard.readText();
     if (text) return text;
@@ -50,6 +63,7 @@ export async function readClipboard(): Promise<string | null> {
 }
 
 export async function writeClipboard(text: string): Promise<boolean> {
+  if (await nativeWrite(text)) return true;
   try {
     await navigator.clipboard.writeText(text);
     return true;

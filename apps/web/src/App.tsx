@@ -5,18 +5,12 @@ import { getDevice } from "./lib/device";
 import { ClipboardWatcher } from "./lib/clipboard";
 import { useTransferManager } from "./lib/useTransferManager";
 import { generateQrDataUrl, buildPairDeepLink, startQrScanner, type ScannerHandle } from "./lib/qr";
+import { buildFileTree, type FileTreeResult } from "./lib/fileTree";
+import { FileTree } from "./components/FileTree";
 
 // Configure via .env: VITE_SIGNALING_URL=wss://your-server.example.com
 const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || "ws://localhost:8787";
 
-// localStorage (not sessionStorage) is deliberate: pairing is meant to be
-// PERMANENT, like pairing a Bluetooth device — it must survive a full
-// browser/tab close and reopen, a phone restart, or the tab being killed
-// by the OS under memory pressure while backgrounded. sessionStorage would
-// silently drop the pairing in exactly those cases, forcing a brand-new
-// QR scan every time — which was the #1 source of "keeps asking me to
-// pair again" complaints. The only way this pairing goes away now is the
-// user explicitly choosing "Forget this device" (see disconnect()).
 const SESSION_KEY = "flowbridge.pairedSession";
 const THEME_KEY = "flowbridge.theme";
 
@@ -27,9 +21,6 @@ function getInitialTheme(): "light" | "dark" {
   } catch {
     /* localStorage unavailable — fall through to system preference */
   }
-  // No explicit user choice yet: default to the OS-level preference rather
-  // than always-dark, since "everything is black" was the #1 UI complaint —
-  // most people expect a light UI unless their system says otherwise.
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
     return "dark";
   }
@@ -84,10 +75,19 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scannerRef = useRef<ScannerHandle | null>(null);
   const autoJoinedRef = useRef(false);
-  // Holds text whose automatic clipboard write failed (tab wasn't focused
-  // at the moment it arrived) until it can be retried — see
-  // onClipboardTextReceived / retryPendingWrite below.
   const pendingWriteRef = useRef<string | null>(null);
+
+  // The file/zip most recently picked to send — its path tree is built and
+  // shown automatically, before/alongside the send, so you can see exactly
+  // what's inside a zip without guessing.
+  const [filePreview, setFilePreview] = useState<{ name: string; size: number; tree: FileTreeResult } | null>(
+    null
+  );
+  const [filePreviewError, setFilePreviewError] = useState<string | null>(null);
+  // Trees for RECEIVED files are built lazily (only when the user asks to
+  // see them) since a big incoming zip shouldn't be unzipped in memory
+  // unless someone actually wants to look inside it.
+  const [receivedTrees, setReceivedTrees] = useState<Record<string, FileTreeResult | "loading" | "error">>({});
 
   useEffect(() => {
     setCanShare(typeof navigator !== "undefined" && !!navigator.share);
@@ -107,14 +107,6 @@ export default function App() {
   const onClipboardTextReceived = useCallback(async (text: string) => {
     const ok = await clipboardRef.current?.writeText(text);
     setClipboardPermission(ok ? "granted" : "denied");
-    // The write most commonly fails because the tab was minimized/behind
-    // another window at the exact moment the text arrived — writeText()
-    // requires document focus, just like readText() does. Previously that
-    // failure was silent and the text was gone for good unless the sender
-    // sent it again. Now: remember it, and the moment this tab regains
-    // focus (see the visibilitychange/focus listener below), retry the
-    // write automatically — no click needed. The "Copy received text"
-    // button in the UI is the guaranteed manual fallback either way.
     pendingWriteRef.current = ok ? null : text;
   }, []);
 
@@ -151,20 +143,12 @@ export default function App() {
     clipboardRef.current = watcher;
     watcher.start();
 
-    // The moment this tab is actually visible/focused again, retry any
-    // clipboard write that failed earlier because the tab was minimized
-    // or behind another window when the text first arrived — turns "open
-    // the browser tab, find the text, copy it out manually" into "click
-    // into the browser (even briefly), it's already on your clipboard."
     const handleFocusRetry = () => {
       if (document.visibilityState === "visible") retryPendingWrite();
     };
     document.addEventListener("visibilitychange", handleFocusRetry);
     window.addEventListener("focus", handleFocusRetry);
 
-    // If this tab already had a live pairing (page reload, not a fresh
-    // visit — sessionStorage only survives within the same tab), silently
-    // reconnect to it instead of showing the "scan/pair" screen again.
     const saved = loadSession();
     if (saved) {
       setStatus("connecting");
@@ -176,9 +160,6 @@ export default function App() {
       watcher.stop();
       document.removeEventListener("visibilitychange", handleFocusRetry);
       window.removeEventListener("focus", handleFocusRetry);
-      // destroy(), not close(): a component unmount (tab close, React
-      // remount, hot reload) must NOT erase the saved pairing — only an
-      // explicit "Forget this device" tap should ever do that.
       conn.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,8 +168,6 @@ export default function App() {
   const startHost = () => connectionRef.current?.hostPairing();
   const startJoin = (codeToUse?: string) => connectionRef.current?.joinPairing(codeToUse ?? joinCode);
 
-  // Generate a scannable QR whenever we're shown a pairing code, so the
-  // other device can just point its camera instead of typing anything.
   useEffect(() => {
     if (!code) {
       setQrDataUrl(null);
@@ -197,8 +176,6 @@ export default function App() {
     generateQrDataUrl(code).then(setQrDataUrl);
   }, [code]);
 
-  // If this page was opened via a scanned/tapped QR deep link
-  // (?pair=82K9-XP4Q), auto-connect immediately — no typing needed.
   useEffect(() => {
     if (autoJoinedRef.current) return;
     const params = new URLSearchParams(window.location.search);
@@ -206,10 +183,7 @@ export default function App() {
     if (linkCode) {
       autoJoinedRef.current = true;
       setJoinCode(linkCode.toUpperCase());
-      // small delay so the FlowConnection instance from the mount effect
-      // above is guaranteed to exist
       setTimeout(() => startJoin(linkCode.toUpperCase()), 50);
-      // clean the URL so refreshing doesn't re-trigger auto-join
       window.history.replaceState({}, "", window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,8 +227,30 @@ export default function App() {
 
   const onFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) sendFile(file);
+    if (!file) return;
     e.target.value = "";
+    sendFile(file);
+
+    setFilePreviewError(null);
+    setFilePreview(null);
+    buildFileTree(file, file.name)
+      .then((tree) => setFilePreview({ name: file.name, size: file.size, tree }))
+      .catch(() => setFilePreviewError("Couldn't read this file's contents (it may not be a valid zip)."));
+  };
+
+  const toggleReceivedTree = (transferId: string, blob: Blob, fileName: string) => {
+    setReceivedTrees((prev) => {
+      if (prev[transferId]) {
+        const { [transferId]: _drop, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [transferId]: "loading" };
+    });
+    if (receivedTrees[transferId]) return;
+
+    buildFileTree(blob, fileName)
+      .then((tree) => setReceivedTrees((prev) => ({ ...prev, [transferId]: tree })))
+      .catch(() => setReceivedTrees((prev) => ({ ...prev, [transferId]: "error" })));
   };
 
   const downloadFile = (blob: Blob, fileName: string) => {
@@ -268,11 +264,6 @@ export default function App() {
 
   const connected = status === "connected";
   const isPairingBusy = status === "waiting-for-code" || status === "pairing" || status === "connecting";
-  // A dropped socket mid-session (screen lock, wifi blip, laptop sleep) sets
-  // status to "disconnected" while we still know who our peer was — that's
-  // an automatic-resume-in-progress, not "not paired at all", so it gets
-  // its own quiet banner instead of dumping the user back to the full
-  // scan/pair screen.
   const isReconnecting = status === "disconnected" && peer !== null;
 
   const copyCode = () => {
@@ -513,6 +504,24 @@ export default function App() {
               <input type="file" onChange={onFilePicked} hidden />
             </label>
 
+            {filePreviewError && <p className="error">{filePreviewError}</p>}
+
+            {filePreview && (
+              <div className="file-preview">
+                <div className="file-preview-header">
+                  <span className="file-preview-name">
+                    {filePreview.tree.isArchive ? "🗜️" : "📄"} {filePreview.name}
+                  </span>
+                  <span className="muted small">
+                    {formatBytes(filePreview.size)}
+                    {filePreview.tree.isArchive &&
+                      ` — ${filePreview.tree.fileCount} file${filePreview.tree.fileCount === 1 ? "" : "s"} inside`}
+                  </span>
+                </div>
+                <FileTree roots={filePreview.tree.roots} />
+              </div>
+            )}
+
             {Object.values(activeTransfers).length > 0 && (
               <div className="transfers">
                 {Object.values(activeTransfers)
@@ -539,14 +548,41 @@ export default function App() {
             {receivedFiles.length > 0 && (
               <div className="received-files">
                 <h4>Received files</h4>
-                {receivedFiles.map((f) => (
-                  <div key={f.transferId} className="file-row">
-                    <span>
-                      {f.fileName} <span className="muted small">({formatBytes(f.blob.size)})</span>
-                    </span>
-                    <button onClick={() => downloadFile(f.blob, f.fileName)}>Save</button>
-                  </div>
-                ))}
+                {receivedFiles.map((f) => {
+                  const isZip = f.fileName.toLowerCase().endsWith(".zip");
+                  const treeState = receivedTrees[f.transferId];
+                  return (
+                    <div key={f.transferId} className="file-row-block">
+                      <div className="file-row">
+                        <span>
+                          {f.fileName} <span className="muted small">({formatBytes(f.blob.size)})</span>
+                        </span>
+                        <span className="button-row">
+                          {isZip && (
+                            <button
+                              className="secondary"
+                              onClick={() => toggleReceivedTree(f.transferId, f.blob, f.fileName)}
+                            >
+                              {treeState ? "Hide contents" : "View contents"}
+                            </button>
+                          )}
+                          <button onClick={() => downloadFile(f.blob, f.fileName)}>Save</button>
+                        </span>
+                      </div>
+                      {treeState === "loading" && <p className="muted small">Reading archive…</p>}
+                      {treeState === "error" && <p className="error">Couldn't read this zip's contents.</p>}
+                      {treeState && treeState !== "loading" && treeState !== "error" && (
+                        <div className="file-preview">
+                          <p className="muted small">
+                            {treeState.fileCount} file{treeState.fileCount === 1 ? "" : "s"} —{" "}
+                            {formatBytes(treeState.totalSize)} uncompressed
+                          </p>
+                          <FileTree roots={treeState.roots} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>

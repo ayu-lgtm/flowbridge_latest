@@ -22,7 +22,8 @@
     "offscreen",
     "storage",
     "downloads",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "wss://*/*",

@@ -8,12 +8,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@flowbridge/protocol": "*",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "qrcode": "^1.5.4",
-    "jsqr": "^1.4.0"
-  },
+  "@flowbridge/protocol": "*",
+  "react": "^18.3.1",
+  "react-dom": "^18.3.1",
+  "qrcode": "^1.5.4",
+  "jsqr": "^1.4.0",
+  "jszip": "^3.10.1"
+},
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

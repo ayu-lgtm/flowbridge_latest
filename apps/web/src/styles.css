@@ -390,10 +390,108 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent-a); }
 .transfer-status { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
 .received-files { margin-top: 14px; }
+.file-row-block + .file-row-block { margin-top: 2px; }
 .file-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 0;
   border-top: 1px solid var(--border);
+  gap: 12px;
 }
+.file-row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- File tree preview ---- */
+
+.file-preview {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-inset);
+  overflow: hidden;
+  animation: file-preview-in 0.18s ease-out;
+}
+
+@keyframes file-preview-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.file-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.file-preview-name {
+  font-weight: 700;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree {
+  padding: 6px 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 0;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+button.tree-row {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+button.tree-row:hover { background: var(--bg-elevated); }
+
+.tree-caret {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--muted, #8b93a7);
+  font-size: 10px;
+}
+
+.tree-icon { flex-shrink: 0; }
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted, #8b93a7);
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.tree-folder .tree-name { font-weight: 600; }
