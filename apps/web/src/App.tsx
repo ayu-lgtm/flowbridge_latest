@@ -123,6 +123,21 @@ export default function App() {
   const { handleIncoming, sendText, sendFile, lastReceivedChars, lastReceivedText, receivedFiles, activeTransfers } =
     useTransferManager(connectionRef.current, device.current.deviceId, onClipboardTextReceived);
 
+  // `handleIncoming` closes over `connectionRef.current`, which is `null` on
+  // the very first render (the effect below hasn't run yet). The connection
+  // setup effect only runs ONCE on mount, so whatever `handleIncoming` it
+  // captured there for `onMessage` is used FOREVER — if that's the
+  // null-connection version, `TransferSender.handleIncoming()` (the
+  // ack-missing / retransmit handler) never gets a live connection to
+  // resend on, so chunks lost during any reconnect never get recovered.
+  // Keeping the latest `handleIncoming` in a ref, and calling through the
+  // ref from `onMessage`, avoids that stale capture without needing to
+  // recreate the FlowConnection on every render.
+  const handleIncomingRef = useRef(handleIncoming);
+  useEffect(() => {
+    handleIncomingRef.current = handleIncoming;
+  }, [handleIncoming]);
+
   useEffect(() => {
     const conn = new FlowConnection(SIGNALING_URL, device.current, {
       onStatus: (s, t) => {
@@ -131,7 +146,7 @@ export default function App() {
       },
       onCode: (c) => setCode(c),
       onPeer: (p) => setPeer(p),
-      onMessage: handleIncoming,
+      onMessage: (msg) => handleIncomingRef.current(msg),
       onError: (m) => setError(m),
       onSession: (info) => saveSession(info),
     });
